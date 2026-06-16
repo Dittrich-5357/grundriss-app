@@ -1,0 +1,92 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f3; color: #1a1a18; }
+
+.app { display: flex; height: 100vh; }
+
+/* Sidebar */
+.sidebar { width: 220px; flex-shrink: 0; background: #fff; border-right: 1px solid #e8e8e4; display: flex; flex-direction: column; }
+.sidebar-logo { padding: 1.5rem 1.25rem 1.25rem; border-bottom: 1px solid #e8e8e4; }
+.sidebar-logo .brand { font-size: 16px; font-weight: 600; color: #1a1a18; }
+.sidebar-logo .sub { font-size: 10px; color: #888; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+nav { padding: 0.75rem 0; flex: 1; }
+.sidebar-bottom { border-top: 1px solid #e8e8e4; padding: 0.75rem 0; }
+.nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 1.25rem; font-size: 14px; color: #666; background: none; border: none; cursor: pointer; text-align: left; }
+.nav-item:hover { background: #f5f5f3; color: #1a1a18; }
+.nav-item.active { background: #f5f5f3; color: #1a1a18; font-weight: 500; }
+.nav-icon { font-size: 16px; width: 18px; text-align: center; }
+
+/* Main */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.topbar { background: #fff; border-bottom: 1px solid #e8e8e4; padding: 0 1.5rem; height: 52px; display: flex; align-items: center; justify-content: space-between; }
+.topbar-title { font-size: 15px; font-weight: 500; }
+.topbar-user { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: #e1f5ee; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #0f6e56; }
+.content { flex: 1; overflow-y: auto; padding: 1.5rem; }
+
+/* Cards */
+.card { background: #fff; border: 1px solid #e8e8e4; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.section-header h2 { font-size: 15px; font-weight: 500; }
+
+/* Grid */
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.metric-card { background: #f5f5f3; border-radius: 8px; padding: 1rem; }
+.metric-label { font-size: 12px; color: #888; margin-bottom: 6px; }
+.metric-value { font-size: 26px; font-weight: 500; }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; font-size: 12px; padding: 3px 10px; border-radius: 6px; font-weight: 500; }
+.badge-success { background: #e1f5ee; color: #0f6e56; }
+.badge-warning { background: #faeeda; color: #854f0b; }
+.badge-danger { background: #fcebeb; color: #a32d2d; }
+.badge-info { background: #e6f1fb; color: #185fa5; }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 500; color: #888; padding: 0 0 10px; border-bottom: 1px solid #e8e8e4; }
+td { padding: 12px 0; border-bottom: 1px solid #e8e8e4; vertical-align: middle; }
+td:not(:first-child), th:not(:first-child) { padding-left: 12px; }
+tr:last-child td { border-bottom: none; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 13px; font-weight: 500; border: 1px solid #d0d0cc; border-radius: 8px; background: transparent; color: #1a1a18; cursor: pointer; }
+.btn:hover { background: #f5f5f3; }
+.btn-primary { background: #0f6e56; color: #fff; border-color: #0f6e56; }
+.btn-primary:hover { background: #085041; border-color: #085041; }
+
+/* Upload zone */
+.upload-zone { border: 1.5px dashed #ccc; border-radius: 12px; padding: 2.5rem; text-align: center; color: #888; cursor: pointer; margin-bottom: 1.5rem; }
+.upload-zone:hover { border-color: #0f6e56; background: #f0faf6; }
+.upload-zone p { font-size: 14px; margin-top: 8px; }
+.upload-zone span { font-size: 12px; }
+
+/* Plan grid */
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; }
+.plan-card { background: #fff; border: 1px solid #e8e8e4; border-radius: 12px; padding: 1rem; cursor: pointer; }
+.plan-card:hover { border-color: #aaa; }
+.plan-thumb { width: 100%; height: 90px; background: #f5f5f3; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; font-size: 28px; }
+.plan-name { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+.plan-date { font-size: 11px; color: #888; }
+
+/* Login */
+.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f5f5f3; }
+.login-card { background: #fff; border: 1px solid #e8e8e4; border-radius: 12px; padding: 2.5rem; width: 360px; }
+.login-logo { margin-bottom: 2rem; }
+.login-logo .brand { font-size: 20px; font-weight: 600; }
+.login-logo .sub { font-size: 11px; color: #888; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 3px; }
+.login-tagline { font-size: 13px; color: #666; margin-bottom: 1.75rem; }
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; font-size: 13px; color: #666; margin-bottom: 5px; }
+.form-group input, .form-group select { width: 100%; padding: 9px 10px; font-size: 14px; border: 1px solid #d0d0cc; border-radius: 8px; background: #fff; color: #1a1a18; outline: none; }
+.form-group input:focus { border-color: #0f6e56; }
+.login-btn { width: 100%; padding: 10px; font-size: 14px; font-weight: 500; background: #0f6e56; color: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 0.5rem; }
+.login-btn:hover { background: #085041; }
+.error-msg { font-size: 13px; color: #a32d2d; margin-top: 0.75rem; text-align: center; }
+
+/* Modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.modal { background: #fff; border-radius: 12px; border: 1px solid #e8e8e4; padding: 1.5rem; width: 420px; max-width: 95vw; }
+.modal h3 { font-size: 15px; font-weight: 500; margin-bottom: 1.25rem; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1.25rem; }
+
+.empty-state { text-align: center; padding: 3rem; color: #888; font-size: 14px; }

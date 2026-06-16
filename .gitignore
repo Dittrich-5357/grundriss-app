@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# production
+build/
+
+# environment variables - NIEMALS in Git einchecken!
+.env
+.env.local
+
+# misc
+.DS_Store
