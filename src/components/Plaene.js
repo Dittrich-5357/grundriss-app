@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 
@@ -19,8 +20,7 @@ export default function Plaene() {
   const [showUpload, setShowUpload] = useState(false)
   const [showGenModal, setShowGenModal] = useState(false)
   const [name, setName] = useState('')
-  const [file, setFile] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [fileUrl, setFileUrl] = useState('')
   const [form, setForm] = useState({ name: '', behoerde: '', frist: '', status: 'Offen' })
 
   const loadPlaene = async () => {
@@ -40,19 +40,10 @@ export default function Plaene() {
     loadGenehmigungen(plan.id)
   }
 
-  const handleUpload = async () => {
+  const handleSavePlan = async () => {
     if (!name) return
-    setLoading(true)
-    let file_url = null
-    if (file) {
-      const ext = file.name.split('.').pop()
-      const path = `${Date.now()}.${ext}`
-      await supabase.storage.from('plaene').upload(path, file)
-      const { data: { publicUrl } } = supabase.storage.from('plaene').getPublicUrl(path)
-      file_url = publicUrl
-    }
-    await supabase.from('plaene').insert({ name, file_name: file?.name || '', file_url })
-    setName(''); setFile(null); setShowUpload(false); setLoading(false)
+    await supabase.from('plaene').insert({ name, file_name: fileUrl, file_url: fileUrl })
+    setName(''); setFileUrl(''); setShowUpload(false)
     loadPlaene()
   }
 
@@ -89,11 +80,6 @@ export default function Plaene() {
               Lageplan öffnen ↗
             </button>
           )}
-        </div>
-
-        <div className="card" style={{ marginBottom: '1rem', padding: '1rem', background: '#f5f5f3', border: 'none' }}>
-          <div style={{ fontSize: 13, color: '#888' }}>Datei</div>
-          <div style={{ fontSize: 14, marginTop: 3 }}>{selectedPlan.file_name || '–'}</div>
         </div>
 
         <div className="section-header">
@@ -162,24 +148,18 @@ export default function Plaene() {
     <div>
       <div className="section-header">
         <h2>Lagepläne</h2>
-        <button className="btn btn-primary" onClick={() => setShowUpload(true)}>+ Plan hochladen</button>
-      </div>
-
-      <div className="upload-zone" onClick={() => setShowUpload(true)}>
-        <div style={{ fontSize: 32 }}>⊞</div>
-        <p>Plan hier ablegen oder klicken zum Hochladen</p>
-        <span>PDF, PNG, JPG – max. 50 MB</span>
+        <button className="btn btn-primary" onClick={() => setShowUpload(true)}>+ Plan hinzufügen</button>
       </div>
 
       {plaene.length === 0 ? (
-        <p className="empty-state">Noch keine Lagepläne hochgeladen.</p>
+        <p className="empty-state">Noch keine Lagepläne angelegt.</p>
       ) : (
         <div className="plan-grid">
           {plaene.map(p => (
             <div key={p.id} className="plan-card" onClick={() => selectPlan(p)}>
               <div className="plan-thumb">⊞</div>
               <div className="plan-name">{p.name}</div>
-              <div className="plan-date">{p.file_name} · {fmtDateShort(p.created_at)}</div>
+              <div className="plan-date">{fmtDateShort(p.created_at)}</div>
             </div>
           ))}
         </div>
@@ -188,14 +168,21 @@ export default function Plaene() {
       {showUpload && (
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setShowUpload(false)}>
           <div className="modal">
-            <h3>Lageplan hochladen</h3>
-            <div className="form-group"><label>Bezeichnung</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="z.B. Werk Nord – Halle 3" /></div>
-            <div className="form-group"><label>Datei</label><input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={e => setFile(e.target.files[0])} /></div>
+            <h3>Lageplan hinzufügen</h3>
+            <div className="form-group">
+              <label>Bezeichnung</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="z.B. Werk Nord – Halle 3" />
+            </div>
+            <div className="form-group">
+              <label>Supabase URL des Lageplans</label>
+              <input type="text" value={fileUrl} onChange={e => setFileUrl(e.target.value)} placeholder="https://...supabase.co/storage/v1/object/public/plaene/..." />
+              <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                Plan zuerst in Supabase Storage hochladen, dann URL hier einfügen.
+              </div>
+            </div>
             <div className="modal-actions">
               <button className="btn" onClick={() => setShowUpload(false)}>Abbrechen</button>
-              <button className="btn btn-primary" onClick={handleUpload} disabled={loading}>
-                {loading ? 'Wird hochgeladen...' : 'Hochladen'}
-              </button>
+              <button className="btn btn-primary" onClick={handleSavePlan}>Speichern</button>
             </div>
           </div>
         </div>
