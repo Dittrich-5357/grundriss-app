@@ -75,6 +75,10 @@ export default function PlanViewer({ plan, onBack }) {
   const [fristForm, setFristForm] = useState({ name: '', typ: '', faellig: '' })
   const [showGenModal, setShowGenModal] = useState(false)
   const [genForm, setGenForm] = useState({ name: '', behoerde: '', status: 'Offen', frist: '' })
+  const [genFile, setGenFile] = useState(null)
+  const [genKiLoading, setGenKiLoading] = useState(false)
+  const [genKiResult, setGenKiResult] = useState(null)
+  const [genKiError, setGenKiError] = useState('')
 
   const imgRef = useRef(null)
 
@@ -102,6 +106,32 @@ export default function PlanViewer({ plan, onBack }) {
     setSelectedZone(zone)
     loadZoneData(zone)
   }
+
+  const deleteZone = async (zone) => {
+    if (!window.confirm(`"${zone.name}" wirklich löschen? Alle zugehörigen Genehmigungen, Dokumente und Fristen werden ebenfalls gelöscht.`)) return
+    await supabase.from('zonen').delete().eq('id', zone.id)
+    if (selectedZone?.id === zone.id) setSelectedZone(null)
+    loadZonen()
+  }
+
+  const deleteGenehmigung = async (id) => {
+    if (!window.confirm('Genehmigung löschen?')) return
+    await supabase.from('genehmigungen').delete().eq('id', id)
+    loadZoneData(selectedZone)
+  }
+
+  const deleteDokument = async (id) => {
+    if (!window.confirm('Dokument löschen?')) return
+    await supabase.from('dokumente').delete().eq('id', id)
+    loadZoneData(selectedZone)
+  }
+
+  const deleteFrist = async (id) => {
+    if (!window.confirm('Frist löschen?')) return
+    await supabase.from('fristen').delete().eq('id', id)
+    loadZoneData(selectedZone)
+  }
+
 
   // Liefert das tatsächlich sichtbare Bild-Rechteck innerhalb des Containers
   // (wichtig bei object-fit: contain, wo Bild und Container nicht gleich groß sind)
@@ -190,28 +220,41 @@ export default function PlanViewer({ plan, onBack }) {
   }
 
   // ---- Dokumente: Mehrfach-Upload mit KI-Analyse pro Datei ----
+  // Dateien werden NACHEINANDER analysiert (nicht parallel), das vermeidet
+  // Überlastung der Edge Function / Anthropic API. Bei Fehler: automatisch 1x erneut versuchen.
   const handleFilesSelected = (fileList) => {
     const files = Array.from(fileList)
     const queue = files.map(file => ({
-      file, status: 'pending', result: null,
+      file, status: 'pending', result: null, retried: false,
       form: { typ: '', bezeichnung: '', behoerde: '', aktenzeichen: '', antragsteller: '', datum: '', frist: '' }
     }))
     setDokQueue(queue)
-    queue.forEach((item, idx) => processQueueItem(idx))
+    processQueueSequentially(queue)
   }
+
+  const processQueueSequentially = async (queue) => {
+    for (let idx = 0; idx < queue.length; idx++) {
+      await processQueueItem(idx)
+    }
+  }
+
+  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result.split(',')[1])
+    r.onerror = reject
+    r.readAsDataURL(file)
+  })
 
   const processQueueItem = async (idx) => {
     setDokQueue(prev => prev.map((it, i) => i === idx ? { ...it, status: 'analyzing' } : it))
+
+    // aktuellen Datei-Stand sicher aus dem State holen
+    let currentFile, currentRetried
+    setDokQueue(prev => { currentFile = prev[idx]?.file; currentRetried = prev[idx]?.retried; return prev })
+    await new Promise(r => setTimeout(r, 0)) // sicherstellen dass State-Update durch ist
+
     try {
-      const file = await new Promise((res) => {
-        setDokQueue(prev => { res(prev[idx].file); return prev })
-      })
-      const base64 = await new Promise((resolve, reject) => {
-        const r = new FileReader()
-        r.onload = () => resolve(r.result.split(',')[1])
-        r.onerror = reject
-        r.readAsDataURL(file)
-      })
+      const base64 = await readFileAsBase64(currentFile)
       const parsed = await analyzeWithAI(base64)
       setDokQueue(prev => prev.map((it, i) => i === idx ? {
         ...it, status: 'done', result: parsed,
@@ -222,8 +265,34 @@ export default function PlanViewer({ plan, onBack }) {
         }
       } : it))
     } catch (err) {
+      if (!currentRetried) {
+        // Ein automatischer Retry, kurze Pause davor
+        setDokQueue(prev => prev.map((it, i) => i === idx ? { ...it, retried: true } : it))
+        await new Promise(r => setTimeout(r, 1500))
+        try {
+          const base64 = await readFileAsBase64(currentFile)
+          const parsed = await analyzeWithAI(base64)
+          setDokQueue(prev => prev.map((it, i) => i === idx ? {
+            ...it, status: 'done', result: parsed,
+            form: {
+              typ: parsed.typ || '', bezeichnung: parsed.bezeichnung || '', behoerde: parsed.behoerde || '',
+              aktenzeichen: parsed.aktenzeichen || '', antragsteller: parsed.antragsteller || '',
+              datum: parsed.datum || '', frist: parsed.frist || ''
+            }
+          } : it))
+          return
+        } catch (err2) {
+          setDokQueue(prev => prev.map((it, i) => i === idx ? { ...it, status: 'error', errorMsg: err2.message } : it))
+          return
+        }
+      }
       setDokQueue(prev => prev.map((it, i) => i === idx ? { ...it, status: 'error', errorMsg: err.message } : it))
     }
+  }
+
+  const retryQueueItem = (idx) => {
+    setDokQueue(prev => prev.map((it, i) => i === idx ? { ...it, retried: false, status: 'pending' } : it))
+    processQueueItem(idx)
   }
 
   const updateQueueForm = (idx, key, value) => {
@@ -260,10 +329,68 @@ export default function PlanViewer({ plan, onBack }) {
     loadZoneData(selectedZone)
   }
 
+  const analyzeGenFile = async (file, isRetry = false) => {
+    if (!file) return
+    setGenKiLoading(true)
+    setGenKiError('')
+    if (!isRetry) setGenKiResult(null)
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(r.result.split(',')[1])
+        r.onerror = reject
+        r.readAsDataURL(file)
+      })
+      const parsed = await analyzeWithAI(base64)
+      setGenKiResult(parsed)
+      setGenForm(f => ({
+        ...f,
+        name: parsed.bezeichnung || f.name,
+        behoerde: parsed.behoerde || f.behoerde,
+        frist: parsed.frist || f.frist,
+        status: parsed.typ === 'Bescheid' ? 'Erteilt' : parsed.typ === 'Ablehnung' ? 'Abgelaufen' : f.status
+      }))
+    } catch (err) {
+      if (!isRetry) {
+        await new Promise(r => setTimeout(r, 1500))
+        return analyzeGenFile(file, true)
+      }
+      setGenKiError(err.message || 'KI-Analyse fehlgeschlagen')
+    }
+    setGenKiLoading(false)
+  }
+
   const saveGen = async () => {
     if (!genForm.name) return
-    await supabase.from('genehmigungen').insert({ zone_id: selectedZone.id, plan_id: plan.id, objekt: selectedZone.name, ...genForm, frist: genForm.frist || null })
-    setGenForm({ name: '', behoerde: '', status: 'Offen', frist: '' }); setShowGenModal(false)
+    const { data: genData, error: genError } = await supabase.from('genehmigungen').insert({
+      zone_id: selectedZone.id, plan_id: plan.id, objekt: selectedZone.name, ...genForm, frist: genForm.frist || null
+    }).select().single()
+
+    if (!genError && genData && genFile) {
+      const path = `dokumente/${Date.now()}_${genFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+      const { error: uploadError } = await supabase.storage.from('plaene').upload(path, genFile)
+      if (!uploadError) {
+        const { data: { publicUrl } } = supabase.storage.from('plaene').getPublicUrl(path)
+        await supabase.from('dokumente').insert({
+          zone_id: selectedZone.id,
+          plan_id: plan.id,
+          genehmigung_id: genData.id,
+          typ: genKiResult?.typ || '',
+          bezeichnung: genForm.name,
+          behoerde: genForm.behoerde,
+          aktenzeichen: genKiResult?.aktenzeichen || '',
+          antragsteller: genKiResult?.antragsteller || '',
+          datum: genKiResult?.datum || null,
+          frist: genForm.frist || null,
+          file_url: publicUrl,
+          ki_extraktion: genKiResult
+        })
+      }
+    }
+
+    setGenForm({ name: '', behoerde: '', status: 'Offen', frist: '' })
+    setGenFile(null); setGenKiResult(null); setGenKiError('')
+    setShowGenModal(false)
     loadZoneData(selectedZone)
   }
 
@@ -295,7 +422,7 @@ export default function PlanViewer({ plan, onBack }) {
           <div
             ref={imgRef}
             style={{ width: '100%', height: '100%', position: 'relative', cursor: drawing ? 'crosshair' : 'default', userSelect: 'none' }}
-            onClick={handleCanvasClick}
+            onClick={isImage ? handleCanvasClick : undefined}
           >
             {plan.file_url ? (
               isImage ? (
@@ -304,7 +431,15 @@ export default function PlanViewer({ plan, onBack }) {
                   style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', position: 'absolute', inset: 0 }}
                 />
               ) : (
-                <iframe src={plan.file_url} style={{ width: '100%', height: '100%', border: 'none', pointerEvents: drawing ? 'none' : 'auto' }} title="Lageplan" />
+                <>
+                  <iframe src={plan.file_url} style={{ width: '100%', height: '100%', border: 'none' }} title="Lageplan" />
+                  {drawing && (
+                    <div
+                      style={{ position: 'absolute', inset: 0, background: 'transparent', cursor: 'crosshair', zIndex: 5 }}
+                      onClick={handleCanvasClick}
+                    />
+                  )}
+                </>
               )
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', fontSize: 14 }}>
@@ -422,7 +557,10 @@ export default function PlanViewer({ plan, onBack }) {
                   <div style={{ fontSize: 15, fontWeight: 600 }}>{selectedZone.name}</div>
                   {selectedZone.nutzung && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{selectedZone.nutzung}</div>}
                 </div>
-                <button className="btn" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setSelectedZone(null)}>✕</button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn" style={{ fontSize: 11, padding: '4px 8px', color: '#B01B0C' }} onClick={() => deleteZone(selectedZone)} title="Gebäude löschen">🗑</button>
+                  <button className="btn" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setSelectedZone(null)}>✕</button>
+                </div>
               </div>
 
               <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
@@ -435,8 +573,9 @@ export default function PlanViewer({ plan, onBack }) {
                 {genehmigungen.length === 0 ? (
                   <div style={{ color: '#aaa', fontSize: 11, marginBottom: 16 }}>Keine erfasst</div>
                 ) : genehmigungen.map(g => (
-                  <div key={g.id} style={{ background: '#f5f5f3', borderRadius: 8, padding: '8px 10px', marginBottom: 6, borderLeft: `3px solid ${statusColor(g.status)}` }}>
-                    <div style={{ fontSize: 12, fontWeight: 600 }}>{g.name}</div>
+                  <div key={g.id} style={{ background: '#f5f5f3', borderRadius: 8, padding: '8px 10px', marginBottom: 6, borderLeft: `3px solid ${statusColor(g.status)}`, position: 'relative' }}>
+                    <button onClick={() => deleteGenehmigung(g.id)} style={{ position: 'absolute', top: 6, right: 6, background: 'none', border: 'none', color: '#bbb', cursor: 'pointer', fontSize: 12, padding: 2 }} title="Löschen">🗑</button>
+                    <div style={{ fontSize: 12, fontWeight: 600, paddingRight: 18 }}>{g.name}</div>
                     {g.behoerde && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{g.behoerde}</div>}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: statusBg(g.status), color: statusColor(g.status) }}>{g.status}</span>
@@ -462,7 +601,10 @@ export default function PlanViewer({ plan, onBack }) {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
                       {d.typ && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#EAF0FC', color: '#1A3F8F' }}>{d.typ}</span>}
-                      <button className="btn" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => window.open(d.file_url, '_blank')}>↗</button>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => window.open(d.file_url, '_blank')}>↗</button>
+                        <button className="btn" style={{ fontSize: 10, padding: '3px 8px', color: '#B01B0C' }} onClick={() => deleteDokument(d.id)}>🗑</button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -485,6 +627,7 @@ export default function PlanViewer({ plan, onBack }) {
                         {f.typ && <div style={{ fontSize: 10, color: '#888', marginTop: 1 }}>{f.typ} · {fmtDate(f.faellig)}</div>}
                       </div>
                       <span style={{ fontSize: 10, fontWeight: 700, color: fc, whiteSpace: 'nowrap' }}>{label}</span>
+                      <button onClick={() => deleteFrist(f.id)} style={{ background: 'none', border: 'none', color: '#bbb', cursor: 'pointer', fontSize: 12, padding: 2 }} title="Löschen">🗑</button>
                     </div>
                   )
                 })}
@@ -533,7 +676,10 @@ export default function PlanViewer({ plan, onBack }) {
                 </div>
 
                 {item.status === 'error' && (
-                  <div style={{ fontSize: 11, color: '#B01B0C', marginBottom: 6 }}>{item.errorMsg || 'KI-Analyse fehlgeschlagen'} – bitte manuell ausfüllen oder Dokument entfernen.</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: '#B01B0C', flex: 1 }}>{item.errorMsg || 'KI-Analyse fehlgeschlagen'} – bitte manuell ausfüllen oder erneut versuchen.</div>
+                    <button className="btn" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => retryQueueItem(idx)}>↻ Erneut versuchen</button>
+                  </div>
                 )}
 
                 {(item.status === 'done' || item.status === 'error') && (
@@ -581,8 +727,31 @@ export default function PlanViewer({ plan, onBack }) {
       {/* Genehmigung modal */}
       {showGenModal && (
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setShowGenModal(false)}>
-          <div className="modal">
+          <div className="modal" style={{ width: 480 }}>
             <h3>Genehmigung erfassen</h3>
+
+            <div className="form-group">
+              <label>Dokument hochladen (optional – KI füllt Felder automatisch aus)</label>
+              <input type="file" accept=".pdf" onChange={e => { const f = e.target.files[0]; setGenFile(f); if (f) analyzeGenFile(f) }} />
+            </div>
+
+            {genKiLoading && (
+              <div style={{ background: '#EAF0FC', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#1A3F8F', marginBottom: '1rem' }}>
+                ✦ KI analysiert das Dokument...
+              </div>
+            )}
+            {genKiResult && (
+              <div style={{ background: '#EAF4EE', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#1A6B3C', marginBottom: '1rem' }}>
+                ✓ KI hat das Dokument analysiert – Felder unten bitte prüfen
+              </div>
+            )}
+            {genKiError && (
+              <div style={{ background: '#FDECEA', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#B01B0C', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ flex: 1 }}>{genKiError} – bitte Felder manuell ausfüllen oder erneut versuchen.</span>
+                <button className="btn" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => analyzeGenFile(genFile)}>↻ Erneut</button>
+              </div>
+            )}
+
             <div className="form-group"><label>Bezeichnung</label><input type="text" value={genForm.name} onChange={e => setGenForm(f => ({ ...f, name: e.target.value }))} placeholder="z.B. Baugenehmigung Erweiterung" /></div>
             <div className="form-group"><label>Behörde</label><input type="text" value={genForm.behoerde} onChange={e => setGenForm(f => ({ ...f, behoerde: e.target.value }))} /></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -594,8 +763,8 @@ export default function PlanViewer({ plan, onBack }) {
               <div className="form-group"><label>Frist</label><input type="date" value={genForm.frist} onChange={e => setGenForm(f => ({ ...f, frist: e.target.value }))} /></div>
             </div>
             <div className="modal-actions">
-              <button className="btn" onClick={() => setShowGenModal(false)}>Abbrechen</button>
-              <button className="btn btn-primary" onClick={saveGen}>Speichern</button>
+              <button className="btn" onClick={() => { setShowGenModal(false); setGenFile(null); setGenKiResult(null); setGenKiError('') }}>Abbrechen</button>
+              <button className="btn btn-primary" onClick={saveGen} disabled={genKiLoading}>Speichern</button>
             </div>
           </div>
         </div>
