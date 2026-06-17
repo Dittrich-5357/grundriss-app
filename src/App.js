@@ -3,7 +3,6 @@ import { supabase } from './supabaseClient'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import Plaene from './components/Plaene'
-import Genehmigungen from './components/Genehmigungen'
 import './App.css'
 
 export default function App() {
@@ -32,9 +31,6 @@ export default function App() {
           <button className={`nav-item ${screen === 'plaene' ? 'active' : ''}`} onClick={() => setScreen('plaene')}>
             <span className="nav-icon">⊞</span> Lagepläne
           </button>
-          <button className={`nav-item ${screen === 'genehmigungen' ? 'active' : ''}`} onClick={() => setScreen('genehmigungen')}>
-            <span className="nav-icon">✓</span> Genehmigungen
-          </button>
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => supabase.auth.signOut()}>
@@ -48,7 +44,6 @@ export default function App() {
           <h1 className="topbar-title">
             {screen === 'dashboard' && 'Dashboard'}
             {screen === 'plaene' && 'Lagepläne'}
-            {screen === 'genehmigungen' && 'Genehmigungen'}
           </h1>
           <div className="topbar-user">
             <div className="avatar">{session.user.email[0].toUpperCase()}</div>
@@ -59,7 +54,6 @@ export default function App() {
         <div className="content">
           {screen === 'dashboard' && <Dashboard setScreen={setScreen} />}
           {screen === 'plaene' && <Plaene />}
-          {screen === 'genehmigungen' && <Genehmigungen />}
         </div>
       </div>
     </div>
