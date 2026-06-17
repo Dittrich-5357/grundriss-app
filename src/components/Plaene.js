@@ -48,6 +48,13 @@ export default function Plaene() {
     load()
   }
 
+  const handleDelete = async (e, plan) => {
+    e.stopPropagation()
+    if (!window.confirm(`"${plan.name}" wirklich löschen? Alle zugehörigen Gebäude, Genehmigungen, Dokumente und Fristen werden ebenfalls gelöscht.`)) return
+    await supabase.from('plaene').delete().eq('id', plan.id)
+    load()
+  }
+
   const fmtDateShort = (d) => new Date(d).toLocaleDateString('de-DE')
 
   if (selectedPlan) {
@@ -72,7 +79,12 @@ export default function Plaene() {
       ) : (
         <div className="plan-grid">
           {plaene.map(p => (
-            <div key={p.id} className="plan-card" onClick={() => setSelectedPlan(p)}>
+            <div key={p.id} className="plan-card" onClick={() => setSelectedPlan(p)} style={{ position: 'relative' }}>
+              <button
+                onClick={(e) => handleDelete(e, p)}
+                style={{ position: 'absolute', top: 8, right: 8, background: '#fff', border: '1px solid #e8e8e4', borderRadius: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: '#B01B0C', zIndex: 2 }}
+                title="Lageplan löschen"
+              >🗑</button>
               <div className="plan-thumb">⊞</div>
               <div className="plan-name">{p.name}</div>
               <div className="plan-date">{fmtDateShort(p.created_at)}</div>
