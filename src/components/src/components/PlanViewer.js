@@ -15,6 +15,45 @@ async function analyzeWithAI(base64Pdf) {
   return data
 }
 
+// Hält das SVG-Overlay exakt über der sichtbaren Bildfläche (wichtig bei object-fit: contain)
+function ImageAlignedOverlay({ containerRef, drawing, children }) {
+  const [rect, setRect] = useState(null)
+
+  useEffect(() => {
+    const update = () => {
+      const container = containerRef.current
+      if (!container) return
+      const containerRect = container.getBoundingClientRect()
+      const imgEl = container.querySelector('img')
+      if (imgEl && imgEl.naturalWidth) {
+        const containerRatio = containerRect.width / containerRect.height
+        const imgRatio = imgEl.naturalWidth / imgEl.naturalHeight
+        let w, h, offX, offY
+        if (imgRatio > containerRatio) {
+          w = containerRect.width
+          h = w / imgRatio
+          offX = 0
+          offY = (containerRect.height - h) / 2
+        } else {
+          h = containerRect.height
+          w = h * imgRatio
+          offY = 0
+          offX = (containerRect.width - w) / 2
+        }
+        setRect({ w, h, offX, offY })
+      }
+    }
+    update()
+    window.addEventListener('resize', update)
+    const interval = setInterval(update, 300) // Bild lädt asynchron, kurz nachprüfen
+    setTimeout(() => clearInterval(interval), 3000)
+    return () => { window.removeEventListener('resize', update); clearInterval(interval) }
+  }, [containerRef])
+
+  if (!rect) return null
+  return children(rect.w, rect.h, rect.offX, rect.offY)
+}
+
 export default function PlanViewer({ plan, onBack }) {
   const [zonen, setZonen] = useState([])
   const [selectedZone, setSelectedZone] = useState(null)
@@ -64,14 +103,49 @@ export default function PlanViewer({ plan, onBack }) {
     loadZoneData(zone)
   }
 
-  const getImgRect = () => imgRef.current?.getBoundingClientRect()
+  // Liefert das tatsächlich sichtbare Bild-Rechteck innerhalb des Containers
+  // (wichtig bei object-fit: contain, wo Bild und Container nicht gleich groß sind)
+  const getVisibleImageRect = () => {
+    const container = imgRef.current
+    if (!container) return null
+    const containerRect = container.getBoundingClientRect()
+    const imgEl = container.querySelector('img')
 
-  // Freihand-Polygon zeichnen: Klicks setzen Punkte, Doppelklick schließt die Form
+    if (imgEl && imgEl.naturalWidth) {
+      const containerRatio = containerRect.width / containerRect.height
+      const imgRatio = imgEl.naturalWidth / imgEl.naturalHeight
+      let visW, visH, offX, offY
+      if (imgRatio > containerRatio) {
+        visW = containerRect.width
+        visH = visW / imgRatio
+        offX = 0
+        offY = (containerRect.height - visH) / 2
+      } else {
+        visH = containerRect.height
+        visW = visH * imgRatio
+        offY = 0
+        offX = (containerRect.width - visW) / 2
+      }
+      return {
+        left: containerRect.left + offX,
+        top: containerRect.top + offY,
+        width: visW,
+        height: visH
+      }
+    }
+    return containerRect
+  }
+
+  // Freihand-Polygon zeichnen: Klicks setzen Punkte
   const handleCanvasClick = (e) => {
     if (!drawing) return
-    const r = getImgRect()
-    const x = ((e.clientX - r.left) / r.width) * 100
-    const y = ((e.clientY - r.top) / r.height) * 100
+    const r = getVisibleImageRect()
+    if (!r) return
+    const xPx = e.clientX - r.left
+    const yPx = e.clientY - r.top
+    if (xPx < 0 || yPx < 0 || xPx > r.width || yPx > r.height) return
+    const x = (xPx / r.width) * 100
+    const y = (yPx / r.height) * 100
     setPoints(prev => [...prev, [x, y]])
   }
 
@@ -225,7 +299,10 @@ export default function PlanViewer({ plan, onBack }) {
           >
             {plan.file_url ? (
               isImage ? (
-                <img src={plan.file_url} alt={plan.name} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+                <img
+                  src={plan.file_url} alt={plan.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', position: 'absolute', inset: 0 }}
+                />
               ) : (
                 <iframe src={plan.file_url} style={{ width: '100%', height: '100%', border: 'none', pointerEvents: drawing ? 'none' : 'auto' }} title="Lageplan" />
               )
@@ -235,35 +312,87 @@ export default function PlanViewer({ plan, onBack }) {
               </div>
             )}
 
-            {/* SVG overlay for polygons */}
-            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 100 100" preserveAspectRatio="none">
-              {zonen.map(zone => (
-                <polygon
-                  key={zone.id}
-                  points={polygonToSvgPoints(zone)}
-                  fill={selectedZone?.id === zone.id ? `${zoneColor(zone)}33` : `${zoneColor(zone)}1A`}
-                  stroke={zoneColor(zone)}
-                  strokeWidth="0.4"
-                  style={{ pointerEvents: drawing ? 'none' : 'auto', cursor: 'pointer' }}
-                  onClick={() => selectZone(zone)}
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-              {drawing && points.length > 0 && (
-                <>
-                  <polyline
-                    points={points.map(p => `${p[0]},${p[1]}`).join(' ')}
-                    fill="none" stroke="#1A3F8F" strokeWidth="0.4" vectorEffect="non-scaling-stroke"
+            {/* SVG overlay - exakt über der sichtbaren Bildfläche positioniert */}
+            {isImage ? (
+              <ImageAlignedOverlay containerRef={imgRef} drawing={drawing}>
+                {(w, h, offX, offY) => (
+                  <>
+                    <svg
+                      style={{ position: 'absolute', left: offX, top: offY, width: w, height: h, pointerEvents: 'none' }}
+                      viewBox="0 0 100 100" preserveAspectRatio="none"
+                    >
+                      {zonen.map(zone => (
+                        <polygon
+                          key={zone.id}
+                          points={polygonToSvgPoints(zone)}
+                          fill={selectedZone?.id === zone.id ? `${zoneColor(zone)}33` : `${zoneColor(zone)}1A`}
+                          stroke={zoneColor(zone)}
+                          strokeWidth="0.4"
+                          style={{ pointerEvents: drawing ? 'none' : 'auto', cursor: 'pointer' }}
+                          onClick={() => selectZone(zone)}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                      {drawing && points.length > 0 && (
+                        <>
+                          <polyline
+                            points={points.map(p => `${p[0]},${p[1]}`).join(' ')}
+                            fill="none" stroke="#1A3F8F" strokeWidth="0.4" vectorEffect="non-scaling-stroke"
+                          />
+                          {points.map((p, i) => (
+                            <circle key={i} cx={p[0]} cy={p[1]} r="0.8" fill="#1A3F8F" vectorEffect="non-scaling-stroke" />
+                          ))}
+                        </>
+                      )}
+                    </svg>
+                    {zonen.map(zone => {
+                      const [cx, cy] = zoneCenter(zone)
+                      return (
+                        <div key={zone.id} style={{
+                          position: 'absolute',
+                          left: offX + (cx / 100) * w,
+                          top: offY + (cy / 100) * h,
+                          transform: 'translate(-50%, -100%)',
+                          background: zoneColor(zone), color: '#fff', fontSize: 10, fontWeight: 600,
+                          padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap', pointerEvents: 'none'
+                        }}>
+                          {zone.name}
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
+              </ImageAlignedOverlay>
+            ) : (
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                {zonen.map(zone => (
+                  <polygon
+                    key={zone.id}
+                    points={polygonToSvgPoints(zone)}
+                    fill={selectedZone?.id === zone.id ? `${zoneColor(zone)}33` : `${zoneColor(zone)}1A`}
+                    stroke={zoneColor(zone)}
+                    strokeWidth="0.4"
+                    style={{ pointerEvents: drawing ? 'none' : 'auto', cursor: 'pointer' }}
+                    onClick={() => selectZone(zone)}
+                    vectorEffect="non-scaling-stroke"
                   />
-                  {points.map((p, i) => (
-                    <circle key={i} cx={p[0]} cy={p[1]} r="0.8" fill="#1A3F8F" vectorEffect="non-scaling-stroke" />
-                  ))}
-                </>
-              )}
-            </svg>
+                ))}
+                {drawing && points.length > 0 && (
+                  <>
+                    <polyline
+                      points={points.map(p => `${p[0]},${p[1]}`).join(' ')}
+                      fill="none" stroke="#1A3F8F" strokeWidth="0.4" vectorEffect="non-scaling-stroke"
+                    />
+                    {points.map((p, i) => (
+                      <circle key={i} cx={p[0]} cy={p[1]} r="0.8" fill="#1A3F8F" vectorEffect="non-scaling-stroke" />
+                    ))}
+                  </>
+                )}
+              </svg>
+            )}
 
-            {/* Labels */}
-            {zonen.map(zone => {
+            {/* Labels - nur für nicht-Bild-Pläne hier, für Bilder innerhalb des Overlays oben */}
+            {!isImage && zonen.map(zone => {
               const [cx, cy] = zoneCenter(zone)
               return (
                 <div key={zone.id} style={{
